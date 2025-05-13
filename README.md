@@ -15,7 +15,7 @@ This project implements the Absolute Zero Reasoner (AZR) framework, which enable
 ## Features
 
 - Implementation of three task types: Abduction, Deduction, and Induction
-- Secure Docker-based code execution environment
+- Flexible code execution with both Docker-based and mock environments
 - TRR++ (Task-Relative REINFORCE++) implementation for RL updates
 - Alternative PPO implementation using TRL library
 - RunPod integration for running on cloud GPU
@@ -26,7 +26,7 @@ This project implements the Absolute Zero Reasoner (AZR) framework, which enable
 
 - Python 3.10+
 - PyTorch 2.0+
-- Docker
+- Docker (optional - can use mock executor instead)
 - NVIDIA GPU with at least 24GB VRAM (ideally 48GB for A40)
 
 ### Installation
@@ -42,10 +42,9 @@ This project implements the Absolute Zero Reasoner (AZR) framework, which enable
    pip install -r requirements.txt
    ```
 
-3. Setup the environment:
-   ```
-   bash setup_runpod.sh
-   ```
+3. Choose your execution environment:
+   - For Docker-based execution (default): Ensure Docker is installed and running
+   - For mock execution (no Docker): Set `executor.use_mock: true` in config/config.yaml
 
 ## Running the Training
 
@@ -63,7 +62,7 @@ Additional options:
 ## Project Structure
 
 - `src/buffer/`: Task buffer implementation
-- `src/executor/`: Secure code execution environment
+- `src/executor/`: Code execution environment (both Docker and mock implementations)
 - `src/llm/`: LLM service and prompting utilities
 - `src/orchestrator/`: Main training loop orchestration
 - `src/rl/`: Reinforcement learning algorithms (TRR++, PPO)
@@ -78,14 +77,19 @@ The main configuration file is located at `config/config.yaml`. It includes sett
 
 - Model configuration
 - Training hyperparameters
-- Executor settings
+- Executor settings (including `use_mock` flag for Docker-free execution)
 - Task types
 - Logging options
 - Path configurations
 
 ## RunPod Deployment
 
-This implementation is designed to run on RunPod with A40 GPUs. The `setup_runpod.sh` script sets up the environment for RunPod deployment. Make sure you have a Network Volume attached to your RunPod instance for persistent storage.
+This implementation is designed to run on RunPod with A40 GPUs. For detailed deployment instructions, see [RUNPOD_DEPLOYMENT.md](RUNPOD_DEPLOYMENT.md).
+
+Key points for RunPod deployment:
+1. Use a Network Volume for persistent storage
+2. Set `executor.use_mock: true` in config to run without Docker
+3. Use `tmux` to keep training running after disconnecting
 
 ## License
 

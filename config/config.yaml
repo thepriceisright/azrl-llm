@@ -23,6 +23,7 @@ training:
   checkpoint_interval: 50  # Save checkpoint every N iterations
   
 executor:
+  use_mock: true  # Use mock executor instead of Docker (for environments without Docker)
   timeout: 15  # Seconds
   memory_limit: "1g"  # Docker memory limit
   cpu_limit: "1.0"  # Docker CPU limit

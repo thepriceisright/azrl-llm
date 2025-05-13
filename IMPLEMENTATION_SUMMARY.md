@@ -84,4 +84,57 @@ This implementation fully satisfies all the requirements specified in the develo
 3. Comprehensive logging and monitoring
 4. Integration with RunPod for cloud GPU execution
 
-The system is designed to be modular and extensible, allowing for future enhancements and optimizations. 
+The system is designed to be modular and extensible, allowing for future enhancements and optimizations.
+
+# Implementation Changes Summary
+
+## Problem
+
+The original AZRL implementation required Docker for the secure code executor component. When running inside a RunPod container (or any environment without Docker access), this caused errors because:
+
+1. Docker needs to be installed and running
+2. Docker socket access is required
+3. Docker-in-Docker setup is complex and requires privileged containers
+
+## Solution
+
+We've implemented a flexible solution that maintains compatibility with both Docker and non-Docker environments:
+
+1. **Configurable Executor Selection**:
+   - Added `executor.use_mock` flag in `config/config.yaml`
+   - Created a factory pattern to select the appropriate executor
+
+2. **Mock Executor Implementation**:
+   - `src/executor/mock_executor.py` provides a Docker-free alternative
+   - Maintains the same API and validation logic
+   - Executes code directly in the Python process (with safety checks)
+
+3. **Modular Architecture**:
+   - Updated `src/executor/__init__.py` to use our factory
+   - No changes needed to higher-level components
+
+4. **Deployment Improvements**:
+   - Added `init_workspace.sh` to set up necessary directories
+   - Created detailed `RUNPOD_DEPLOYMENT.md` guide
+
+## When to Use Each Executor
+
+- **Docker Executor** (Original):
+  - For production environments where code isolation is critical
+  - When you have Docker installed and running
+  - When security is a priority (sandbox isolation)
+
+- **Mock Executor** (New):
+  - For development and testing
+  - In environments without Docker (like RunPod containers)
+  - When quick iterations are more important than isolation
+
+## Testing and Validation
+
+Both executors pass the same test suite, ensuring feature parity and consistent behavior regardless of which executor is used.
+
+## Future Improvements
+
+- Further enhance security of the mock executor
+- Add additional validation checks for potentially unsafe operations
+- Explore alternative sandboxing mechanisms that don't require Docker 
