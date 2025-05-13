@@ -1,0 +1,24 @@
+# Base dependencies
+torch>=2.0.0
+transformers>=4.35.0
+accelerate>=0.23.0
+datasets>=2.14.0
+trl>=0.7.2
+peft>=0.6.0
+bitsandbytes>=0.41.0
+
+# Reinforcement learning
+wandb>=0.15.0
+
+# Executor dependencies
+docker>=6.1.0
+python-dotenv>=1.0.0
+ast-comments>=1.0.0
+pyyaml>=6.0
+
+# Utilities
+tqdm>=4.65.0
+numpy>=1.24.0
+pandas>=2.0.0
+matplotlib>=3.7.0
+jsonlines>=3.1.0 

@@ -1,0 +1,71 @@
+model:
+  name: "Qwen/Qwen2.5-Coder-3B"
+  max_prompt_length: 6144
+  max_response_length: 8096
+
+training:
+  rl_algorithm: "TRR++"  # or "PPO"
+  optimizer: "AdamW"
+  learning_rate: 1.0e-6
+  batch_size: 32  # Adjusted for A40 48GB VRAM
+  ppo_epochs: 1
+  use_kl: false
+  entropy_coeff: 0.001
+  rollout_temp: 1.0
+  rollout_top_p: 1.0
+  k_references: 6  # Number of reference tasks to sample from buffer
+  n_samples: 8  # Number of samples for task accuracy estimation
+  format_penalty:
+    formatted_wrong: -0.5
+    format_error: -1.0
+  seed_batch_factor: 4
+  max_buffer_size: 16384  # Maximum number of tasks to store in buffer
+  checkpoint_interval: 50  # Save checkpoint every N iterations
+  
+executor:
+  timeout: 15  # Seconds
+  memory_limit: "1g"  # Docker memory limit
+  cpu_limit: "1.0"  # Docker CPU limit
+  # List of forbidden modules that should not be allowed in executed code
+  forbidden_modules:
+    - os
+    - sys
+    - subprocess
+    - multiprocessing
+    - socket
+    - requests
+    - urllib
+    - http
+    - ftplib
+    - telnetlib
+    - smtplib
+    - poplib
+    - imaplib
+    - nntplib
+    - webbrowser
+    - shutil
+    - pathlib
+    - tempfile
+    - io
+    - builtins
+    - importlib
+    - runpy
+    - code
+    - contextlib
+    - asyncio
+
+task_types:
+  - "abduction"
+  - "deduction"
+  - "induction"
+
+logging:
+  level: "INFO"
+  use_wandb: true
+  wandb_project: "azrl-qwen25-coder-3b"
+  log_dir: "logs"
+
+paths:
+  buffer_dir: "/workspace/buffer"  # Path on RunPod network volume
+  checkpoint_dir: "/workspace/checkpoints"  # Path on RunPod network volume
+  log_dir: "/workspace/logs"  # Path on RunPod network volume 
