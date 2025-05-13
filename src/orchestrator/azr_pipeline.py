@@ -6,6 +6,7 @@ import time
 from typing import Dict, List, Tuple, Any, Optional, Union
 from dataclasses import dataclass
 import traceback
+import datetime  # Added for timestamped logs
 
 from utils import get_logger, get_config
 from src.llm import get_model_service, get_prompt_manager
@@ -39,11 +40,17 @@ class AZRPipeline:
         self.config = get_config()
         
         # Get components
+        self.logger.log("Initializing model service...")
         self.model_service = get_model_service()
+        self.logger.log("Initializing prompt manager...")
         self.prompt_manager = get_prompt_manager()
+        self.logger.log("Initializing task buffer...")
         self.task_buffer = get_task_buffer()
+        self.logger.log("Initializing executor...")
         self.executor = get_executor()
+        self.logger.log("Initializing reward calculator...")
         self.reward_calculator = get_reward_calculator()
+        self.logger.log("Initializing RL trainer...")
         self.rl_trainer = get_rl_trainer()
         
         # Get configuration
@@ -53,9 +60,12 @@ class AZRPipeline:
         self.checkpoint_interval = self.config.get("training.checkpoint_interval", 50)
         self.rollout_temp = self.config.get("training.rollout_temp", 1.0)
         self.rollout_top_p = self.config.get("training.rollout_top_p", 1.0)
+        self.progress_interval = self.config.get("logging.progress_interval", 60)  # Seconds between progress updates
         
         # Initialize task buffer if empty
+        self.logger.log("Initializing task buffer with seed examples...")
         self.task_buffer.initialize_with_seed_examples()
+        self.logger.log("Pipeline initialization complete.")
     
     def _parse_abduction_deduction_proposal(self, text: str, task_type: str) -> TaskProposal:
         """
@@ -381,7 +391,9 @@ class AZRPipeline:
         Returns:
             Dictionary of metrics from the iteration
         """
-        self.logger.log("Starting AZ training iteration")
+        start_time = time.time()
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.logger.log(f"[{now}] Starting AZ training iteration")
         
         # Select a random task type
         task_type = random.choice(self.task_types)
@@ -400,31 +412,42 @@ class AZRPipeline:
         }
         
         # Generate and validate task proposal
-        self.logger.log(f"Generating task proposal for {task_type}")
+        self.logger.log(f"[STEP 1/6] Generating task proposal for {task_type}")
+        gen_start = time.time()
         proposal, raw_proposal = self._generate_task_proposal(task_type)
+        gen_duration = time.time() - gen_start
+        self.logger.log(f"Proposal generation completed in {gen_duration:.2f} seconds")
         
         # Validate the proposal
-        self.logger.log("Validating task proposal")
+        self.logger.log("[STEP 2/6] Validating task proposal")
+        val_start = time.time()
         is_valid, error_reason, ground_truth = self._validate_task_proposal(proposal)
+        val_duration = time.time() - val_start
+        self.logger.log(f"Validation completed in {val_duration:.2f} seconds")
         
         if not is_valid:
             self.logger.log(f"Task proposal is invalid: {error_reason}")
             metrics["error_reason"] = error_reason
+            end_time = time.time()
+            metrics["duration"] = end_time - start_time
             return metrics
         
         # For abduction, we need to find an input that produces the output
         if task_type == "abduction":
+            self.logger.log("[STEP 3/6] Generating input for abduction task")
             input_data = self._generate_input_for_abduction(proposal.program, proposal.output)
             if input_data is None:
                 self.logger.log("Could not find input for abduction task")
                 metrics["error_reason"] = "Could not find input for abduction task"
+                end_time = time.time()
+                metrics["duration"] = end_time - start_time
                 return metrics
             
             # Update the proposal
             proposal.input_data = input_data
         
         # Add the validated task to the buffer
-        self.logger.log("Adding task to buffer")
+        self.logger.log("[STEP 4/6] Adding task to buffer")
         if task_type == "abduction" or task_type == "deduction":
             task_data = {
                 "program": proposal.program,
@@ -441,18 +464,23 @@ class AZRPipeline:
         self.task_buffer.add_task(task_type, task_data)
         
         # Run solver N times and calculate learnability reward
-        self.logger.log(f"Running solver {self.n_samples} times to estimate learnability")
+        self.logger.log(f"[STEP 5/6] Running solver {self.n_samples} times to estimate learnability")
         solver_results = []
         
         for i in range(self.n_samples):
             try:
+                solver_start = time.time()
+                self.logger.log(f"Running solver instance {i+1}/{self.n_samples}")
+                
                 # Run solver
                 solution, has_format_error, raw_solution = self._run_solver(task_type, task_data)
                 
                 # Verify solution
                 if has_format_error:
                     is_correct = False
+                    self.logger.log(f"Solver {i+1} produced output with format error")
                 else:
+                    self.logger.log(f"Verifying solution from solver {i+1}")
                     is_correct = self._verify_solution(
                         task_type,
                         proposal.program,
@@ -461,6 +489,7 @@ class AZRPipeline:
                         task_data["input"] if task_type == "abduction" else None,
                         task_data["examples"] if task_type == "induction" else None
                     )
+                    self.logger.log(f"Solution from solver {i+1} is {'correct' if is_correct else 'incorrect'}")
                 
                 # Calculate solver reward
                 solver_reward = self.reward_calculator.calculate_solver_reward(
@@ -477,8 +506,11 @@ class AZRPipeline:
                 })
                 
                 metrics["solver_rewards"].append(solver_reward)
+                solver_duration = time.time() - solver_start
+                self.logger.log(f"Solver {i+1} completed in {solver_duration:.2f} seconds (reward: {solver_reward:.2f})")
+                
             except Exception as e:
-                self.logger.log(f"Error during solver execution: {e}", level="ERROR")
+                self.logger.log(f"Error during solver {i+1} execution: {e}", level="ERROR")
                 self.logger.log(traceback.format_exc(), level="ERROR")
                 
                 # Count as a failure
@@ -527,11 +559,18 @@ class AZRPipeline:
                 metrics["solver_examples"] += 1
         
         # Update model weights using RL
-        self.logger.log(f"Updating model weights with {len(rl_examples)} examples")
+        self.logger.log(f"[STEP 6/6] Updating model weights with {len(rl_examples)} examples")
+        training_start = time.time()
         training_stats = self.rl_trainer.update(self.model_service.model, rl_examples)
+        training_duration = time.time() - training_start
         metrics["training_stats"] = training_stats
         
-        self.logger.log("AZ training iteration completed")
+        end_time = time.time()
+        total_duration = end_time - start_time
+        metrics["duration"] = total_duration
+        
+        self.logger.log(f"AZ training iteration completed in {total_duration:.2f} seconds")
+        self.logger.log(f"Summary: proposer_reward={proposer_reward:.2f}, solver_accuracy={solver_accuracy:.2f}")
         return metrics
     
     def train(self, num_iterations: int) -> List[Dict[str, Any]]:
@@ -544,12 +583,16 @@ class AZRPipeline:
         Returns:
             List of metrics from each iteration
         """
-        self.logger.log(f"Starting AZ training for {num_iterations} iterations")
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.logger.log(f"[{now}] Starting AZ training for {num_iterations} iterations")
         
         all_metrics = []
+        last_progress_time = time.time()
         
         for iteration in range(num_iterations):
-            self.logger.log(f"Starting iteration {iteration+1}/{num_iterations}")
+            iteration_start_time = time.time()
+            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.logger.log(f"[{now}] ===== Starting iteration {iteration+1}/{num_iterations} =====")
             
             try:
                 metrics = self.run_iteration()
@@ -563,15 +606,52 @@ class AZRPipeline:
                 if (iteration + 1) % self.checkpoint_interval == 0:
                     checkpoint_path = self.model_service.save_checkpoint()
                     self.logger.log(f"Saved checkpoint to {checkpoint_path}")
+                
+                # Calculate ETA
+                if len(all_metrics) > 0:
+                    avg_duration = sum(m.get("duration", 0) for m in all_metrics) / len(all_metrics)
+                    remaining_iterations = num_iterations - (iteration + 1)
+                    eta_seconds = avg_duration * remaining_iterations
+                    eta_hours = eta_seconds // 3600
+                    eta_minutes = (eta_seconds % 3600) // 60
+                    eta_seconds = eta_seconds % 60
+                    self.logger.log(f"Estimated time remaining: {int(eta_hours)}h {int(eta_minutes)}m {int(eta_seconds)}s")
             
             except Exception as e:
                 self.logger.log(f"Error during iteration {iteration+1}: {e}", level="ERROR")
                 self.logger.log(traceback.format_exc(), level="ERROR")
+                
+                # Output a heartbeat message to show the process is still alive
+                now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self.logger.log(f"[{now}] Attempting to continue with next iteration...")
+            
+            # Output periodic progress updates even if nothing seems to be happening
+            current_time = time.time()
+            if current_time - last_progress_time > self.progress_interval:
+                now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self.logger.log(f"[{now}] PROGRESS UPDATE: Completed {iteration+1}/{num_iterations} iterations")
+                last_progress_time = current_time
+            
+            iteration_duration = time.time() - iteration_start_time
+            self.logger.log(f"Iteration {iteration+1}/{num_iterations} completed in {iteration_duration:.2f} seconds")
         
-        self.logger.log(f"AZ training completed after {num_iterations} iterations")
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.logger.log(f"[{now}] AZ training completed after {num_iterations} iterations")
         
         # Save final checkpoint
         checkpoint_path = self.model_service.save_checkpoint()
         self.logger.log(f"Saved final checkpoint to {checkpoint_path}")
+        
+        # Calculate average metrics
+        if all_metrics:
+            avg_proposer_reward = sum(m.get("proposer_reward", 0) for m in all_metrics) / len(all_metrics)
+            avg_solver_accuracy = sum(m.get("solver_accuracy", 0) for m in all_metrics) / len(all_metrics)
+            avg_duration = sum(m.get("duration", 0) for m in all_metrics) / len(all_metrics)
+            
+            self.logger.log(f"Training summary:")
+            self.logger.log(f" - Completed iterations: {len(all_metrics)}")
+            self.logger.log(f" - Average proposer reward: {avg_proposer_reward:.4f}")
+            self.logger.log(f" - Average solver accuracy: {avg_solver_accuracy:.4f}")
+            self.logger.log(f" - Average iteration duration: {avg_duration:.2f} seconds")
         
         return all_metrics 

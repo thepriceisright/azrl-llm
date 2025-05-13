@@ -21,8 +21,8 @@ class ModelService:
     def __init__(self, 
                 model_name: Optional[str] = None, 
                 use_lora: bool = True,
-                load_in_8bit: bool = False,
-                load_in_4bit: bool = True,
+                load_in_8bit: bool = True,
+                load_in_4bit: bool = False,
                 device: Optional[str] = None):
         """
         Initialize the model service.
